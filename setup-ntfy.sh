@@ -141,7 +141,8 @@ EOF
 
 a2ensite ntfy >/dev/null
 apache2ctl configtest
-systemctl reload apache2
+systemctl enable apache2 >/dev/null 2>&1 || true
+systemctl restart apache2 || die "Apache ne démarre pas : systemctl status apache2 ; journalctl -xeu apache2 ; ss -tlnp | grep :80"
 
 if [[ $HTTPS -eq 1 ]]; then
   info "HTTPS avec certbot..."
