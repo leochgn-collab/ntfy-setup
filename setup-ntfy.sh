@@ -55,16 +55,28 @@ for ((i=1; i<=NB; i++)); do
 done
 
 echo
-if yesno "Activer HTTPS automatiquement avec certbot (le DNS doit déjà pointer ici) ?" "o"; then
-  HTTPS=1; BASE_URL="https://${DOMAIN}"
+echo "Quel reverse proxy est devant ntfy ?"
+echo "  1) Zoraxy (ou autre proxy externe : il gère déjà HTTPS)"
+echo "  2) Apache sur cette machine (+ certbot en option)"
+ask "Choix" "1"; PROXY="$REPLY"
+HTTPS=0
+if [[ "$PROXY" == "2" ]]; then
+  if yesno "Activer HTTPS automatiquement avec certbot (le DNS doit déjà pointer ici) ?" "o"; then
+    HTTPS=1; BASE_URL="https://${DOMAIN}"
+  else
+    BASE_URL="http://${DOMAIN}"
+  fi
+  LISTEN="127.0.0.1:2586"
 else
-  HTTPS=0; BASE_URL="http://${DOMAIN}"
+  BASE_URL="https://${DOMAIN}"   # le proxy externe fait le HTTPS
+  LISTEN=":2586"                 # écoute sur toutes les interfaces pour que Zoraxy puisse joindre ntfy
 fi
 
 # ---------- 2. Installation ----------
 info "Installation des paquets..."
 apt-get update -qq
-apt-get install -y -qq curl gnupg openssl sudo apache2
+apt-get install -y -qq curl gnupg openssl sudo
+[[ "$PROXY" == "2" ]] && apt-get install -y -qq apache2
 
 if ! command -v ntfy >/dev/null 2>&1; then
   info "Ajout du dépôt officiel ntfy..."
@@ -85,7 +97,7 @@ info "Écriture de /etc/ntfy/server.yml..."
 mkdir -p /var/cache/ntfy/attachments /var/lib/ntfy
 cat > /etc/ntfy/server.yml <<EOF
 base-url: "${BASE_URL}"
-listen-http: "127.0.0.1:2586"
+listen-http: "${LISTEN}"
 behind-proxy: true
 
 cache-file: "/var/cache/ntfy/cache.db"
@@ -116,6 +128,7 @@ sleep 2
 systemctl is-active --quiet ntfy || die "ntfy ne démarre pas : journalctl -u ntfy -e"
 
 # ---------- 4. Apache (reverse proxy + WebSocket) ----------
+if [[ "$PROXY" == "2" ]]; then
 info "Configuration Apache..."
 a2enmod proxy proxy_http proxy_wstunnel rewrite headers >/dev/null
 
@@ -149,6 +162,9 @@ if [[ $HTTPS -eq 1 ]]; then
   apt-get install -y -qq certbot python3-certbot-apache
   certbot --apache -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect \
     || warn "certbot a échoué (DNS ?). Relance plus tard : certbot --apache -d ${DOMAIN}"
+fi
+else
+  info "Proxy externe (Zoraxy) : pointe-le vers ce_serveur:2586 avec WebSocket activé."
 fi
 
 # ---------- 5. Création des comptes ----------
